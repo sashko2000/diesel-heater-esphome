@@ -30,6 +30,29 @@ heaters ship with the same controller and will probably work too.
 | `docs/diesel-heater-wiring.svg` / `.png` | Wiring diagram and its generator script |
 
 
+## Afterburner? Which "blue wire" do you have
+
+Most people searching for Chinese diesel heater control find **Afterburner** (Ray Jones' open-source controller,
+see e.g. [github.com/NiklasVoigt/Afterburner](https://github.com/NiklasVoigt/Afterburner)). Afterburner speaks the
+**"blue wire" UART protocol**: 25000 baud, 24-byte frames with a CRC, sent by the classic rotary-knob / LCD controllers.
+
+This project is for a **different blue-wire protocol** used by the 5-button LCD controller (VEVOR and look-alikes):
+slow **PWM bits of ~12 ms**, an 8-bit command and a 16-bit reply once per second, no UART at all.
+On this heater an Afterburner-style UART decoder at 25000 baud only receives zeros.
+
+How to tell them apart:
+
+| | Afterburner / UART blue wire | This project (PWM blue wire) |
+|---|---|---|
+| Controller | rotary knob or older LCD controllers | 5-button LCD: gear / OK left, up / power / down right, 433 MHz icon |
+| Signal | UART 25000 baud, 24-byte frames, CRC16 | PWM, bit ≈ 12 ms, 30 ms low sync, 8 + 16 bit words |
+| Data | voltages, fan RPM, pump Hz, glow plug, temperatures | state, power level 1–6, internal temperature |
+| What to use | Afterburner (or an ESPHome UART port of it) | this repository |
+
+If you are not sure, flash this firmware and watch the log: with the PWM protocol you will see
+`state: word 0x600D = Stopped` (or similar) within a few seconds.
+No Afterburner code is used here; its sources were only read to compare the protocols.
+
 ## Protocol at a glance
 
 ![Protocol timing](docs/protocol-timing.png)

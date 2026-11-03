@@ -5,6 +5,13 @@ Heater: VEVOR diesel air heater with the 5-button LCD controller (433 MHz icon),
 The same controller is used on many other Chinese heaters.
 Not verified with an oscilloscope.
 
+## Not the Afterburner protocol
+
+The well-known "blue wire" protocol supported by Afterburner is a UART at 25000 baud with 24-byte frames and CRC16.
+This heater/controller pair uses a different, much slower PWM encoding (below). A UART receiver at 25000 baud on this
+line receives only 0x00 bytes (tested). Both protocols use the same three-wire cable (red 5 V, blue data, black GND),
+so the wire colour alone does not tell you which one you have.
+
 ## Physical layer
 
 - Single wire, idle **high**, about **3.3 V** logic on this heater (multimeter shows 2.2–3.6 V while data flows).
