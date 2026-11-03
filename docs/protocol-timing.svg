@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 620" width="1400" height="620" font-family="DejaVu Sans, Arial, sans-serif">
+<rect width="1400" height="620" fill="#fafaf7"/>
+<text x="40" y="42" font-size="22" text-anchor="start" font-weight="bold" fill="#263238">Blue-wire protocol: one frame (controller command A6 + heater reply 0x600D)</text>
+<text x="40" y="66" font-size="14" text-anchor="start" font-weight="normal" fill="#546e7a">Idle line is high (~3.3 V). Bit period ~12 ms. Every word starts with a 30 ms low sync. One frame per second.</text>
+<polyline points="40.0,130 108.0,130 108.0,190 210.0,190 210.0,130 237.2,130 237.2,190 250.8,190 250.8,130 264.4,130 264.4,190 291.6,190 291.6,130 318.8,130 318.8,190 332.4,190 332.4,130 346.0,130 346.0,190 373.2,190 373.2,130 386.8,130 386.8,190 414.0,190 414.0,130 441.2,130 441.2,190 454.8,190 454.8,130 482.0,130 482.0,190 495.6,190 495.6,130 509.2,130 509.2,190 536.4,190 536.4,130 541.5,130 541.5,190 643.5,190 643.5,130 657.1,130 657.1,190 684.3,190 684.3,130 711.5,130 711.5,190 725.1,190 725.1,130 752.3,130 752.3,190 765.9,190 765.9,130 779.5,130 779.5,190 806.7,190 806.7,130 820.3,130 820.3,190 847.5,190 847.5,130 861.1,130 861.1,190 888.3,190 888.3,130 901.9,130 901.9,190 929.1,190 929.1,130 942.7,130 942.7,190 969.9,190 969.9,130 983.5,130 983.5,190 1010.7,190 1010.7,130 1024.3,130 1024.3,190 1051.5,190 1051.5,130 1065.1,130 1065.1,190 1092.3,190 1092.3,130 1105.9,130 1105.9,190 1133.1,190 1133.1,130 1160.3,130 1160.3,190 1173.9,190 1173.9,130 1201.1,130 1201.1,190 1214.7,190 1214.7,130 1228.3,130 1228.3,190 1255.5,190 1255.5,130 1282.7,130 1282.7,190 1296.3,190 1296.3,130 1364.3,130" fill="none" stroke="#1565c0" stroke-width="2.5"/>
+<rect x="108.0" y="200" width="102.0" height="22" fill="#eceff1"/>
+<text x="159.0" y="216" font-size="12" text-anchor="middle" font-weight="normal" fill="#263238">sync 30 ms</text>
+<rect x="210.0" y="200" width="326.4" height="22" fill="#e3f2fd"/>
+<text x="373.2" y="216" font-size="12" text-anchor="middle" font-weight="normal" fill="#263238">command 8 bit: A6 = 1010 0110</text>
+<text x="373.2" y="112" font-size="12" text-anchor="middle" font-weight="normal" fill="#546e7a">from the controller (master)</text>
+<rect x="541.5" y="200" width="102.0" height="22" fill="#eceff1"/>
+<text x="592.5" y="216" font-size="12" text-anchor="middle" font-weight="normal" fill="#263238">sync</text>
+<rect x="643.5" y="200" width="652.8" height="22" fill="#e8f5e9"/>
+<text x="969.9" y="216" font-size="12" text-anchor="middle" font-weight="normal" fill="#263238">reply 16 bit: 0x600D = 0110 0000 0000 1101 (stopped)</text>
+<text x="969.9" y="112" font-size="12" text-anchor="middle" font-weight="normal" fill="#546e7a">from the heater, 1–2 ms after the command</text>
+<text x="230.4" y="156" font-size="12" text-anchor="middle" font-weight="normal" fill="#1565c0">1</text>
+<text x="271.2" y="156" font-size="12" text-anchor="middle" font-weight="normal" fill="#1565c0">0</text>
+<text x="312.0" y="156" font-size="12" text-anchor="middle" font-weight="normal" fill="#1565c0">1</text>
+<text x="352.8" y="156" font-size="12" text-anchor="middle" font-weight="normal" fill="#1565c0">0</text>
+<text x="393.6" y="156" font-size="12" text-anchor="middle" font-weight="normal" fill="#1565c0">0</text>
+<text x="434.40000000000003" y="156" font-size="12" text-anchor="middle" font-weight="normal" fill="#1565c0">1</text>
+<text x="475.20000000000005" y="156" font-size="12" text-anchor="middle" font-weight="normal" fill="#1565c0">1</text>
+<text x="516.0000000000001" y="156" font-size="12" text-anchor="middle" font-weight="normal" fill="#1565c0">0</text>
+<text x="663.9" y="156" font-size="12" text-anchor="middle" font-weight="normal" fill="#1565c0">0</text>
+<text x="704.6999999999999" y="156" font-size="12" text-anchor="middle" font-weight="normal" fill="#1565c0">1</text>
+<text x="745.4999999999999" y="156" font-size="12" text-anchor="middle" font-weight="normal" fill="#1565c0">1</text>
+<text x="786.2999999999998" y="156" font-size="12" text-anchor="middle" font-weight="normal" fill="#1565c0">0</text>
+<text x="827.0999999999998" y="156" font-size="12" text-anchor="middle" font-weight="normal" fill="#1565c0">0</text>
+<text x="867.8999999999997" y="156" font-size="12" text-anchor="middle" font-weight="normal" fill="#1565c0">0</text>
+<text x="908.6999999999997" y="156" font-size="12" text-anchor="middle" font-weight="normal" fill="#1565c0">0</text>
+<text x="949.4999999999997" y="156" font-size="12" text-anchor="middle" font-weight="normal" fill="#1565c0">0</text>
+<text x="990.2999999999996" y="156" font-size="12" text-anchor="middle" font-weight="normal" fill="#1565c0">0</text>
+<text x="1031.0999999999997" y="156" font-size="12" text-anchor="middle" font-weight="normal" fill="#1565c0">0</text>
+<text x="1071.8999999999996" y="156" font-size="12" text-anchor="middle" font-weight="normal" fill="#1565c0">0</text>
+<text x="1112.6999999999996" y="156" font-size="12" text-anchor="middle" font-weight="normal" fill="#1565c0">0</text>
+<text x="1153.4999999999995" y="156" font-size="12" text-anchor="middle" font-weight="normal" fill="#1565c0">1</text>
+<text x="1194.2999999999995" y="156" font-size="12" text-anchor="middle" font-weight="normal" fill="#1565c0">1</text>
+<text x="1235.0999999999995" y="156" font-size="12" text-anchor="middle" font-weight="normal" fill="#1565c0">0</text>
+<text x="1275.8999999999994" y="156" font-size="12" text-anchor="middle" font-weight="normal" fill="#1565c0">1</text>
+<text x="40" y="250" font-size="13" text-anchor="start" font-weight="normal" fill="#546e7a">then ~650 ms idle high until the next frame (the ESP32 sends its own frame in this pause, 80–300 ms after the last edge)</text>
+<text x="40" y="300" font-size="18" text-anchor="start" font-weight="bold" fill="#263238">Bit encoding</text>
+<polyline points="60.0,390 87.0,390 87.0,340 123.0,340 123.0,390 195.0,390 195.0,340 204.0,340" fill="none" stroke="#1565c0" stroke-width="2.5"/>
+<text x="105" y="332" font-size="12" text-anchor="middle" font-weight="normal" fill="#263238">4 ms</text>
+<text x="159" y="405" font-size="12" text-anchor="middle" font-weight="normal" fill="#263238">8 ms</text>
+<text x="123" y="425" font-size="13" text-anchor="middle" font-weight="bold" fill="#263238">"0" = 4 ms high + 8 ms low</text>
+<polyline points="420.0,390 447.0,390 447.0,340 519.0,340 519.0,390 555.0,390 555.0,340 564.0,340" fill="none" stroke="#1565c0" stroke-width="2.5"/>
+<text x="483" y="332" font-size="12" text-anchor="middle" font-weight="normal" fill="#263238">8 ms</text>
+<text x="537" y="405" font-size="12" text-anchor="middle" font-weight="normal" fill="#263238">4 ms</text>
+<text x="483" y="425" font-size="13" text-anchor="middle" font-weight="bold" fill="#263238">"1" = 8 ms high + 4 ms low</text>
+<text x="800" y="345" font-size="13" text-anchor="start" font-weight="normal" fill="#263238">Decode: high longer than low → 1.</text>
+<text x="800" y="367" font-size="13" text-anchor="start" font-weight="normal" fill="#263238">Low ≥ 20 ms → sync (start of a word).</text>
+<text x="800" y="389" font-size="13" text-anchor="start" font-weight="normal" fill="#263238">Line high > 15 ms after bits → word finished.</text>
+<text x="800" y="411" font-size="13" text-anchor="start" font-weight="normal" fill="#263238">MSB first.</text>
+<text x="40" y="470" font-size="16" text-anchor="start" font-weight="bold" fill="#263238">Commands (8 bit)</text>
+<text x="40" y="495" font-size="13" text-anchor="start" font-weight="bold" fill="#263238">A6</text>
+<text x="90" y="495" font-size="13" text-anchor="start" font-weight="normal" fill="#263238">status, no key</text>
+<text x="40" y="517" font-size="13" text-anchor="start" font-weight="bold" fill="#263238">A2</text>
+<text x="90" y="517" font-size="13" text-anchor="start" font-weight="normal" fill="#263238">power: toggles start/stop</text>
+<text x="40" y="539" font-size="13" text-anchor="start" font-weight="bold" fill="#263238">A3</text>
+<text x="90" y="539" font-size="13" text-anchor="start" font-weight="normal" fill="#263238">level up</text>
+<text x="40" y="561" font-size="13" text-anchor="start" font-weight="bold" fill="#263238">A4</text>
+<text x="90" y="561" font-size="13" text-anchor="start" font-weight="normal" fill="#263238">level down</text>
+<text x="40" y="583" font-size="13" text-anchor="start" font-weight="bold" fill="#263238">AF</text>
+<text x="90" y="583" font-size="13" text-anchor="start" font-weight="normal" fill="#263238">temperature request</text>
+<text x="480" y="470" font-size="16" text-anchor="start" font-weight="bold" fill="#263238">Replies (16 bit)</text>
+<text x="480" y="495" font-size="13" text-anchor="start" font-weight="bold" fill="#263238">600D</text>
+<text x="700" y="495" font-size="13" text-anchor="start" font-weight="normal" fill="#263238">stopped</text>
+<text x="480" y="517" font-size="13" text-anchor="start" font-weight="bold" fill="#263238">6042 / 6842 / 6942</text>
+<text x="700" y="517" font-size="13" text-anchor="start" font-weight="normal" fill="#263238">starting (level = low nibble + 1)</text>
+<text x="480" y="539" font-size="13" text-anchor="start" font-weight="bold" fill="#263238">6C4x / 6D4x</text>
+<text x="700" y="539" font-size="13" text-anchor="start" font-weight="normal" fill="#263238">running, level x+1</text>
+<text x="480" y="561" font-size="13" text-anchor="start" font-weight="bold" fill="#263238">xxC0 (61C0, 64C0, 69C0)</text>
+<text x="700" y="561" font-size="13" text-anchor="start" font-weight="normal" fill="#263238">purge after stop</text>
+<text x="480" y="583" font-size="13" text-anchor="start" font-weight="bold" fill="#263238">4xxx</text>
+<text x="700" y="583" font-size="13" text-anchor="start" font-weight="normal" fill="#263238">temperature: 10-bit NTC ADC (see protocol.md)</text>
+</svg>

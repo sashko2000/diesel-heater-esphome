@@ -1,0 +1,688 @@
+# Heater dashboard for Home Assistant (one view). Requires: HACS button-card, package packages/diesel_heater.yaml,
+# firmware esphome/diesel-heater.yaml. Install: Settings -> Dashboards -> Add dashboard -> open it -> Edit ->
+# ⋮ -> Raw configuration editor -> paste this whole file. Replace sensor.cabin_temperature with your cabin sensor.
+views:
+  - title: Heater
+    path: heater
+    icon: mdi:radiator
+    type: panel
+    cards:
+      # Heater view: state on the left (power button in the top right corner of the tile, clickable level bars 1-6),
+      # thermostat on the right (mode, comfort and antifreeze setpoints). 
+      # Wide screen (900 px and more): two halves; narrower: one column. Requires HACS button-card and packages/diesel_heater.yaml.
+      - type: custom:button-card
+        show_name: false
+        show_icon: false
+        tap_action:
+          action: none
+        extra_styles: |
+          #power { grid-area: status !important; justify-self: end !important; align-self: start !important; z-index: 2; margin: 10px 10px 0 0; }
+          @media (max-width: 899px) {
+            #container {
+              grid-template-columns: minmax(0, 1fr) !important;
+              grid-template-areas: "status" "thermo" !important;
+            }
+          }
+          @media (max-width: 599px) {
+            ha-card { padding: 8px !important; }
+          }
+        styles:
+          card:
+            - box-sizing: border-box
+            - min-height: calc(100vh - var(--header-height, 56px))
+            - padding: 14px 20px 20px 20px
+            - border-radius: 0
+            - box-shadow: none
+            - border: none
+            # Background: pure black in a dark HA theme, pure white in a light one
+            - background: "[[[ return (hass.themes && hass.themes.darkMode) ? '#000000' : '#ffffff'; ]]]"
+          grid:
+            - grid-template-areas: '"status thermo"'
+            - grid-template-columns: minmax(0, 1fr) minmax(0, 1fr)
+            - grid-template-rows: auto
+            - column-gap: 16px
+            - row-gap: 16px
+            - align-items: stretch
+          custom_fields:
+            status:
+              - box-sizing: border-box
+              - border: 1px solid rgba(127,127,127,.28)
+              - border-radius: 20px
+              - padding: 6px
+              - "--ha-card-background": transparent
+              - "--ha-card-box-shadow": none
+              - "--ha-card-border-width": 0px
+            thermo:
+              - box-sizing: border-box
+              - border: 1px solid rgba(127,127,127,.28)
+              - border-radius: 20px
+              - padding: 6px
+              - "--ha-card-background": transparent
+              - "--ha-card-box-shadow": none
+              - "--ha-card-border-width": 0px
+            power:
+              - width: 128px
+        custom_fields:
+          # Power button: placed over the top right corner of the state tile (CSS #power in extra_styles)
+          power:
+            card:
+              type: custom:button-card
+              entity: switch.heater_power_diesel_heater
+              icon: mdi:power
+              show_state: false
+              triggers_update:
+                - sensor.run_state_diesel_heater
+              name: |
+                [[[[ const r = (states['sensor.run_state_diesel_heater'] || {}).state; return r === 'Stopped' ? 'Start' : (r === 'Starting' || r === 'Running') ? 'Stop' : r === 'Purge' ? 'Purge' : '—'; ]]]]
+              tap_action:
+                action: call-service
+                service: switch.toggle
+                target:
+                  entity_id: switch.heater_power_diesel_heater
+                confirmation:
+                  text: |
+                    [[[[ const r = (states['sensor.run_state_diesel_heater'] || {}).state; return (r === 'Starting' || r === 'Running') ? 'Stop the heater? A purge will start; do not cut the power meanwhile.' : r === 'Purge' ? 'Purge in progress: start will be refused. Send anyway?' : 'Start the heater?'; ]]]]
+              styles:
+                card:
+                  - width: 128px
+                  - height: 84px
+                  - border-radius: 16px
+                  - box-shadow: none
+                  - background: |
+                      [[[[ const r = (states['sensor.run_state_diesel_heater'] || {}).state; const c = r === 'Stopped' ? '#2f9e6f' : (r === 'Starting' || r === 'Running') ? '#e5484d' : r === 'Purge' ? '#4aa3ff' : '#9aa5b1'; return c + '26'; ]]]]
+                  - border: |
+                      [[[[ const r = (states['sensor.run_state_diesel_heater'] || {}).state; const c = r === 'Stopped' ? '#2f9e6f' : (r === 'Starting' || r === 'Running') ? '#e5484d' : r === 'Purge' ? '#4aa3ff' : '#9aa5b1'; return '2px solid ' + c; ]]]]
+                  - opacity: |
+                      [[[[ const r = (states['sensor.run_state_diesel_heater'] || {}).state; return (r === 'Stopped' || r === 'Starting' || r === 'Running') ? 1 : 0.55; ]]]]
+                icon:
+                  - width: 28px
+                  - color: |
+                      [[[[ const r = (states['sensor.run_state_diesel_heater'] || {}).state; return r === 'Stopped' ? '#2f9e6f' : (r === 'Starting' || r === 'Running') ? '#e5484d' : r === 'Purge' ? '#4aa3ff' : '#9aa5b1'; ]]]]
+                name:
+                  - font-size: 16px
+                  - font-weight: 700
+          # State: header, level bars 1-6 (tap sets the level), a line with heater temperature, link and the last command
+          status:
+            card:
+              type: vertical-stack
+              cards:
+                - type: custom:button-card
+                  entity: sensor.run_state_diesel_heater
+                  triggers_update:
+                    - binary_sensor.heater_link_diesel_heater
+                    - input_select.heater_mode
+                  show_icon: true
+                  show_name: true
+                  show_state: true
+                  tap_action:
+                    action: more-info
+                  icon: |
+                    [[[[ const m = { 'Stopped': 'mdi:radiator-off', 'Starting': 'mdi:radiator', 'Running': 'mdi:fire', 'Purge': 'mdi:fan' }; return m[entity.state] || 'mdi:radiator-off'; ]]]]
+                  state_display: |
+                    [[[[ const link = (states['binary_sensor.heater_link_diesel_heater'] || {}).state === 'on'; if (!link) return 'No link'; return (entity.state === 'unknown' || entity.state === 'unavailable') ? '—' : entity.state; ]]]]
+                  name: |
+                    [[[[ const r = entity.state; const m = (states['input_select.heater_mode'] || {}).state || 'Manual'; const h = r === 'Purge' ? 'purge in progress, start after it' : r === 'Starting' ? 'ignition, about a minute and a half' : 'diesel heater'; return h + ' · mode: ' + m; ]]]]
+                  styles:
+                    grid:
+                      - grid-template-areas: '"i s" "i n"'
+                      - grid-template-columns: 64px minmax(0, 1fr)
+                      - grid-template-rows: min-content min-content
+                      - column-gap: 12px
+                    card:
+                      - padding: 12px 148px 6px 12px
+                      - min-height: 96px
+                    img_cell:
+                      - width: 56px
+                      - height: 56px
+                      - border-radius: 50%
+                      - background-color: |
+                          [[[[ const link = (states['binary_sensor.heater_link_diesel_heater'] || {}).state === 'on'; const c = !link ? '#9aa5b1' : ({ 'Stopped': '#9aa5b1', 'Starting': '#f5a524', 'Running': '#e5484d', 'Purge': '#4aa3ff' }[entity.state] || '#9aa5b1'); return c + '26'; ]]]]
+                    icon:
+                      - width: 32px
+                      - color: |
+                          [[[[ const link = (states['binary_sensor.heater_link_diesel_heater'] || {}).state === 'on'; return !link ? '#9aa5b1' : ({ 'Stopped': '#9aa5b1', 'Starting': '#f5a524', 'Running': '#e5484d', 'Purge': '#4aa3ff' }[entity.state] || '#9aa5b1'); ]]]]
+                    state:
+                      - justify-self: start
+                      - font-size: clamp(22px, 1.5vw + 12px, 30px)
+                      - font-weight: 700
+                      - color: |
+                          [[[[ const link = (states['binary_sensor.heater_link_diesel_heater'] || {}).state === 'on'; return !link ? '#9aa5b1' : ({ 'Stopped': '#9aa5b1', 'Starting': '#f5a524', 'Running': '#e5484d', 'Purge': '#4aa3ff' }[entity.state] || '#9aa5b1'); ]]]]
+                    name:
+                      - justify-self: start
+                      - font-size: 13px
+                      - opacity: 0.75
+                      - white-space: normal
+                      - text-align: left
+                - type: markdown
+                  text_only: true
+                  content: "Power level: tap a bar (1 minimum, 6 maximum). Always 1 in thermostat modes."
+                - type: horizontal-stack
+                  cards:
+                    - type: custom:button-card
+                      entity: number.heater_level_diesel_heater
+                      name: "1"
+                      show_icon: false
+                      show_state: false
+                      triggers_update:
+                        - sensor.run_state_diesel_heater
+                      tap_action:
+                        action: call-service
+                        service: number.set_value
+                        target:
+                          entity_id: number.heater_level_diesel_heater
+                        data:
+                          value: 1
+                      custom_fields:
+                        b: |
+                          [[[[ const r = (states['sensor.run_state_diesel_heater'] || {}).state; const run = r === 'Starting' || r === 'Running'; const lv = parseFloat(entity.state); const on = run && !isNaN(lv) && lv >= 1; return `<div style="height:24px;border-radius:7px;background:${on ? '#f5a524' : 'rgba(127,127,127,.25)'}"></div>`; ]]]]
+                      styles:
+                        grid:
+                          - grid-template-areas: '"b" "n"'
+                          - grid-template-columns: minmax(0, 1fr)
+                          - grid-template-rows: 1fr min-content
+                        card:
+                          - height: 104px
+                          - padding: 4px 3px
+                          - background: transparent
+                          - box-shadow: none
+                          - border: none
+                          - opacity: |
+                              [[[[ const r = (states['sensor.run_state_diesel_heater'] || {}).state; return (r === 'Starting' || r === 'Running') ? 1 : 0.45; ]]]]
+                        custom_fields:
+                          b:
+                            - align-self: end
+                            - width: 100%
+                        name:
+                          - font-size: 14px
+                          - font-weight: 700
+                          - color: |
+                              [[[[ const r = (states['sensor.run_state_diesel_heater'] || {}).state; return ((r === 'Starting' || r === 'Running') && parseFloat(entity.state) === 1) ? '#f5a524' : 'var(--primary-text-color)'; ]]]]
+                    - type: custom:button-card
+                      entity: number.heater_level_diesel_heater
+                      name: "2"
+                      show_icon: false
+                      show_state: false
+                      triggers_update:
+                        - sensor.run_state_diesel_heater
+                      tap_action:
+                        action: call-service
+                        service: number.set_value
+                        target:
+                          entity_id: number.heater_level_diesel_heater
+                        data:
+                          value: 2
+                      custom_fields:
+                        b: |
+                          [[[[ const r = (states['sensor.run_state_diesel_heater'] || {}).state; const run = r === 'Starting' || r === 'Running'; const lv = parseFloat(entity.state); const on = run && !isNaN(lv) && lv >= 2; return `<div style="height:34px;border-radius:7px;background:${on ? '#f5a524' : 'rgba(127,127,127,.25)'}"></div>`; ]]]]
+                      styles:
+                        grid:
+                          - grid-template-areas: '"b" "n"'
+                          - grid-template-columns: minmax(0, 1fr)
+                          - grid-template-rows: 1fr min-content
+                        card:
+                          - height: 104px
+                          - padding: 4px 3px
+                          - background: transparent
+                          - box-shadow: none
+                          - border: none
+                          - opacity: |
+                              [[[[ const r = (states['sensor.run_state_diesel_heater'] || {}).state; return (r === 'Starting' || r === 'Running') ? 1 : 0.45; ]]]]
+                        custom_fields:
+                          b:
+                            - align-self: end
+                            - width: 100%
+                        name:
+                          - font-size: 14px
+                          - font-weight: 700
+                          - color: |
+                              [[[[ const r = (states['sensor.run_state_diesel_heater'] || {}).state; return ((r === 'Starting' || r === 'Running') && parseFloat(entity.state) === 2) ? '#f5a524' : 'var(--primary-text-color)'; ]]]]
+                    - type: custom:button-card
+                      entity: number.heater_level_diesel_heater
+                      name: "3"
+                      show_icon: false
+                      show_state: false
+                      triggers_update:
+                        - sensor.run_state_diesel_heater
+                      tap_action:
+                        action: call-service
+                        service: number.set_value
+                        target:
+                          entity_id: number.heater_level_diesel_heater
+                        data:
+                          value: 3
+                      custom_fields:
+                        b: |
+                          [[[[ const r = (states['sensor.run_state_diesel_heater'] || {}).state; const run = r === 'Starting' || r === 'Running'; const lv = parseFloat(entity.state); const on = run && !isNaN(lv) && lv >= 3; return `<div style="height:44px;border-radius:7px;background:${on ? '#f5a524' : 'rgba(127,127,127,.25)'}"></div>`; ]]]]
+                      styles:
+                        grid:
+                          - grid-template-areas: '"b" "n"'
+                          - grid-template-columns: minmax(0, 1fr)
+                          - grid-template-rows: 1fr min-content
+                        card:
+                          - height: 104px
+                          - padding: 4px 3px
+                          - background: transparent
+                          - box-shadow: none
+                          - border: none
+                          - opacity: |
+                              [[[[ const r = (states['sensor.run_state_diesel_heater'] || {}).state; return (r === 'Starting' || r === 'Running') ? 1 : 0.45; ]]]]
+                        custom_fields:
+                          b:
+                            - align-self: end
+                            - width: 100%
+                        name:
+                          - font-size: 14px
+                          - font-weight: 700
+                          - color: |
+                              [[[[ const r = (states['sensor.run_state_diesel_heater'] || {}).state; return ((r === 'Starting' || r === 'Running') && parseFloat(entity.state) === 3) ? '#f5a524' : 'var(--primary-text-color)'; ]]]]
+                    - type: custom:button-card
+                      entity: number.heater_level_diesel_heater
+                      name: "4"
+                      show_icon: false
+                      show_state: false
+                      triggers_update:
+                        - sensor.run_state_diesel_heater
+                      tap_action:
+                        action: call-service
+                        service: number.set_value
+                        target:
+                          entity_id: number.heater_level_diesel_heater
+                        data:
+                          value: 4
+                      custom_fields:
+                        b: |
+                          [[[[ const r = (states['sensor.run_state_diesel_heater'] || {}).state; const run = r === 'Starting' || r === 'Running'; const lv = parseFloat(entity.state); const on = run && !isNaN(lv) && lv >= 4; return `<div style="height:54px;border-radius:7px;background:${on ? '#f5a524' : 'rgba(127,127,127,.25)'}"></div>`; ]]]]
+                      styles:
+                        grid:
+                          - grid-template-areas: '"b" "n"'
+                          - grid-template-columns: minmax(0, 1fr)
+                          - grid-template-rows: 1fr min-content
+                        card:
+                          - height: 104px
+                          - padding: 4px 3px
+                          - background: transparent
+                          - box-shadow: none
+                          - border: none
+                          - opacity: |
+                              [[[[ const r = (states['sensor.run_state_diesel_heater'] || {}).state; return (r === 'Starting' || r === 'Running') ? 1 : 0.45; ]]]]
+                        custom_fields:
+                          b:
+                            - align-self: end
+                            - width: 100%
+                        name:
+                          - font-size: 14px
+                          - font-weight: 700
+                          - color: |
+                              [[[[ const r = (states['sensor.run_state_diesel_heater'] || {}).state; return ((r === 'Starting' || r === 'Running') && parseFloat(entity.state) === 4) ? '#f5a524' : 'var(--primary-text-color)'; ]]]]
+                    - type: custom:button-card
+                      entity: number.heater_level_diesel_heater
+                      name: "5"
+                      show_icon: false
+                      show_state: false
+                      triggers_update:
+                        - sensor.run_state_diesel_heater
+                      tap_action:
+                        action: call-service
+                        service: number.set_value
+                        target:
+                          entity_id: number.heater_level_diesel_heater
+                        data:
+                          value: 5
+                      custom_fields:
+                        b: |
+                          [[[[ const r = (states['sensor.run_state_diesel_heater'] || {}).state; const run = r === 'Starting' || r === 'Running'; const lv = parseFloat(entity.state); const on = run && !isNaN(lv) && lv >= 5; return `<div style="height:64px;border-radius:7px;background:${on ? '#f5a524' : 'rgba(127,127,127,.25)'}"></div>`; ]]]]
+                      styles:
+                        grid:
+                          - grid-template-areas: '"b" "n"'
+                          - grid-template-columns: minmax(0, 1fr)
+                          - grid-template-rows: 1fr min-content
+                        card:
+                          - height: 104px
+                          - padding: 4px 3px
+                          - background: transparent
+                          - box-shadow: none
+                          - border: none
+                          - opacity: |
+                              [[[[ const r = (states['sensor.run_state_diesel_heater'] || {}).state; return (r === 'Starting' || r === 'Running') ? 1 : 0.45; ]]]]
+                        custom_fields:
+                          b:
+                            - align-self: end
+                            - width: 100%
+                        name:
+                          - font-size: 14px
+                          - font-weight: 700
+                          - color: |
+                              [[[[ const r = (states['sensor.run_state_diesel_heater'] || {}).state; return ((r === 'Starting' || r === 'Running') && parseFloat(entity.state) === 5) ? '#f5a524' : 'var(--primary-text-color)'; ]]]]
+                    - type: custom:button-card
+                      entity: number.heater_level_diesel_heater
+                      name: "6"
+                      show_icon: false
+                      show_state: false
+                      triggers_update:
+                        - sensor.run_state_diesel_heater
+                      tap_action:
+                        action: call-service
+                        service: number.set_value
+                        target:
+                          entity_id: number.heater_level_diesel_heater
+                        data:
+                          value: 6
+                      custom_fields:
+                        b: |
+                          [[[[ const r = (states['sensor.run_state_diesel_heater'] || {}).state; const run = r === 'Starting' || r === 'Running'; const lv = parseFloat(entity.state); const on = run && !isNaN(lv) && lv >= 6; return `<div style="height:74px;border-radius:7px;background:${on ? '#f5a524' : 'rgba(127,127,127,.25)'}"></div>`; ]]]]
+                      styles:
+                        grid:
+                          - grid-template-areas: '"b" "n"'
+                          - grid-template-columns: minmax(0, 1fr)
+                          - grid-template-rows: 1fr min-content
+                        card:
+                          - height: 104px
+                          - padding: 4px 3px
+                          - background: transparent
+                          - box-shadow: none
+                          - border: none
+                          - opacity: |
+                              [[[[ const r = (states['sensor.run_state_diesel_heater'] || {}).state; return (r === 'Starting' || r === 'Running') ? 1 : 0.45; ]]]]
+                        custom_fields:
+                          b:
+                            - align-self: end
+                            - width: 100%
+                        name:
+                          - font-size: 14px
+                          - font-weight: 700
+                          - color: |
+                              [[[[ const r = (states['sensor.run_state_diesel_heater'] || {}).state; return ((r === 'Starting' || r === 'Running') && parseFloat(entity.state) === 6) ? '#f5a524' : 'var(--primary-text-color)'; ]]]]
+                - type: markdown
+                  text_only: true
+                  content: >-
+                    {% set tc = states('sensor.heater_temperature_diesel_heater') %}Heater temperature: **{{ (tc | float) | round(0) | int ~ ' °C' if tc | is_number else '—' }}**
+                    · link: {{ 'yes' if is_state('binary_sensor.heater_link_diesel_heater', 'on') else 'no' }}
+
+                    Last command: {{ states('sensor.heater_command_result_diesel_heater') }}
+          # Thermostat (package packages/diesel_heater.yaml): cabin sensor, mode, two setpoints, hysteresis ±2 °C, always level 1
+          thermo:
+            card:
+              type: vertical-stack
+              cards:
+                - type: custom:button-card
+                  entity: sensor.cabin_temperature
+                  name: Cabin
+                  icon: mdi:home-thermometer-outline
+                  show_icon: true
+                  show_name: true
+                  show_state: true
+                  show_label: true
+                  triggers_update:
+                    - input_select.heater_mode
+                    - input_number.heater_comfort_temp
+                    - input_number.heater_antifreeze_temp
+                  tap_action:
+                    action: more-info
+                  state_display: |
+                    [[[[ const v = parseFloat(entity.state); return isNaN(v) ? '—' : v.toFixed(1) + ' °C'; ]]]]
+                  label: |
+                    [[[[ const m = (states['input_select.heater_mode'] || {}).state; const num = (id) => parseFloat((states[id] || {}).state); if (m !== 'Comfort' && m !== 'Antifreeze') return 'Manual mode: the thermostat does not control the heater'; const sp = m === 'Comfort' ? num('input_number.heater_comfort_temp') : num('input_number.heater_antifreeze_temp'); if (isNaN(sp)) return m; return m + ': ' + sp.toFixed(1) + ' °C · start at ' + (sp - 2).toFixed(1) + ', stop at ' + (sp + 2).toFixed(1) + ' · level 1'; ]]]]
+                  styles:
+                    grid:
+                      - grid-template-areas: '"i n" "i s" "i l"'
+                      - grid-template-columns: 64px minmax(0, 1fr)
+                      - grid-template-rows: min-content min-content min-content
+                      - column-gap: 12px
+                    card:
+                      - padding: 12px
+                      - min-height: 96px
+                    img_cell:
+                      - width: 56px
+                      - height: 56px
+                      - border-radius: 50%
+                      - background-color: |
+                          [[[[ const v = parseFloat(entity.state); return (isNaN(v) ? '#9aa5b1' : v < 5 ? '#4aa3ff' : v < 16 ? '#2f7ed8' : v <= 26 ? '#2f9e6f' : '#f5a524') + '26'; ]]]]
+                    icon:
+                      - width: 32px
+                      - color: |
+                          [[[[ const v = parseFloat(entity.state); return isNaN(v) ? '#9aa5b1' : v < 5 ? '#4aa3ff' : v < 16 ? '#2f7ed8' : v <= 26 ? '#2f9e6f' : '#f5a524'; ]]]]
+                    name:
+                      - justify-self: start
+                      - font-size: 13px
+                      - opacity: 0.75
+                    state:
+                      - justify-self: start
+                      - font-size: clamp(22px, 1.5vw + 12px, 30px)
+                      - font-weight: 700
+                    label:
+                      - justify-self: start
+                      - font-size: 12px
+                      - opacity: 0.75
+                      - white-space: normal
+                      - text-align: left
+                - type: horizontal-stack
+                  cards:
+                    - type: custom:button-card
+                      entity: input_select.heater_mode
+                      name: "Manual"
+                      icon: "mdi:hand-back-right-outline"
+                      show_state: false
+                      tap_action:
+                        action: call-service
+                        service: input_select.select_option
+                        target:
+                          entity_id: input_select.heater_mode
+                        data:
+                          option: "Manual"
+                      styles:
+                        card:
+                          - height: 76px
+                          - padding: 6px 4px
+                          - border-radius: 14px
+                          - box-shadow: none
+                          - background: |
+                              [[[[ return entity.state === 'Manual' ? '#9aa5b133' : 'transparent'; ]]]]
+                          - border: |
+                              [[[[ return entity.state === 'Manual' ? '2px solid #9aa5b1' : '1px solid rgba(127,127,127,.35)'; ]]]]
+                        icon:
+                          - width: 26px
+                          - color: '#9aa5b1'
+                        name:
+                          - font-size: clamp(11px, 0.6vw + 7px, 14px)
+                          - font-weight: 700
+                          - white-space: normal
+                          - word-break: break-word
+                    - type: custom:button-card
+                      entity: input_select.heater_mode
+                      name: "Comfort"
+                      icon: "mdi:sofa-outline"
+                      show_state: false
+                      tap_action:
+                        action: call-service
+                        service: input_select.select_option
+                        target:
+                          entity_id: input_select.heater_mode
+                        data:
+                          option: "Comfort"
+                      styles:
+                        card:
+                          - height: 76px
+                          - padding: 6px 4px
+                          - border-radius: 14px
+                          - box-shadow: none
+                          - background: |
+                              [[[[ return entity.state === 'Comfort' ? '#f5a52433' : 'transparent'; ]]]]
+                          - border: |
+                              [[[[ return entity.state === 'Comfort' ? '2px solid #f5a524' : '1px solid rgba(127,127,127,.35)'; ]]]]
+                        icon:
+                          - width: 26px
+                          - color: '#f5a524'
+                        name:
+                          - font-size: clamp(11px, 0.6vw + 7px, 14px)
+                          - font-weight: 700
+                          - white-space: normal
+                          - word-break: break-word
+                    - type: custom:button-card
+                      entity: input_select.heater_mode
+                      name: "Antifreeze"
+                      icon: "mdi:snowflake-alert"
+                      show_state: false
+                      tap_action:
+                        action: call-service
+                        service: input_select.select_option
+                        target:
+                          entity_id: input_select.heater_mode
+                        data:
+                          option: "Antifreeze"
+                      styles:
+                        card:
+                          - height: 76px
+                          - padding: 6px 4px
+                          - border-radius: 14px
+                          - box-shadow: none
+                          - background: |
+                              [[[[ return entity.state === 'Antifreeze' ? '#4aa3ff33' : 'transparent'; ]]]]
+                          - border: |
+                              [[[[ return entity.state === 'Antifreeze' ? '2px solid #4aa3ff' : '1px solid rgba(127,127,127,.35)'; ]]]]
+                        icon:
+                          - width: 26px
+                          - color: '#4aa3ff'
+                        name:
+                          - font-size: clamp(11px, 0.6vw + 7px, 14px)
+                          - font-weight: 700
+                          - white-space: normal
+                          - word-break: break-word
+                - type: horizontal-stack
+                  cards:
+                    - type: custom:button-card
+                      entity: input_number.heater_comfort_temp
+                      icon: mdi:minus
+                      show_name: false
+                      show_state: false
+                      tap_action:
+                        action: call-service
+                        service: input_number.decrement
+                        target:
+                          entity_id: input_number.heater_comfort_temp
+                      styles:
+                        card:
+                          - height: 72px
+                          - border-radius: 14px
+                          - border: 1px solid rgba(127,127,127,.35)
+                          - box-shadow: none
+                        icon:
+                          - width: 28px
+                    - type: custom:button-card
+                      entity: input_number.heater_comfort_temp
+                      name: "Comfort"
+                      show_icon: false
+                      show_state: true
+                      triggers_update:
+                        - input_select.heater_mode
+                      tap_action:
+                        action: more-info
+                      state_display: |
+                        [[[[ const v = parseFloat(entity.state); return isNaN(v) ? '—' : v.toFixed(1) + ' °C'; ]]]]
+                      styles:
+                        grid:
+                          - grid-template-areas: '"n" "s"'
+                          - grid-template-rows: min-content min-content
+                        card:
+                          - height: 72px
+                          - padding: 6px 4px
+                          - border-radius: 14px
+                          - box-shadow: none
+                          - border: |
+                              [[[[ return (states['input_select.heater_mode'] || {}).state === 'Comfort' ? '2px solid #f5a524' : '1px solid rgba(127,127,127,.35)'; ]]]]
+                        name:
+                          - font-size: 12px
+                          - opacity: 0.75
+                          - white-space: normal
+                        state:
+                          - font-size: clamp(18px, 1vw + 12px, 24px)
+                          - font-weight: 700
+                          - color: '#f5a524'
+                    - type: custom:button-card
+                      entity: input_number.heater_comfort_temp
+                      icon: mdi:plus
+                      show_name: false
+                      show_state: false
+                      tap_action:
+                        action: call-service
+                        service: input_number.increment
+                        target:
+                          entity_id: input_number.heater_comfort_temp
+                      styles:
+                        card:
+                          - height: 72px
+                          - border-radius: 14px
+                          - border: 1px solid rgba(127,127,127,.35)
+                          - box-shadow: none
+                        icon:
+                          - width: 28px
+                - type: horizontal-stack
+                  cards:
+                    - type: custom:button-card
+                      entity: input_number.heater_antifreeze_temp
+                      icon: mdi:minus
+                      show_name: false
+                      show_state: false
+                      tap_action:
+                        action: call-service
+                        service: input_number.decrement
+                        target:
+                          entity_id: input_number.heater_antifreeze_temp
+                      styles:
+                        card:
+                          - height: 72px
+                          - border-radius: 14px
+                          - border: 1px solid rgba(127,127,127,.35)
+                          - box-shadow: none
+                        icon:
+                          - width: 28px
+                    - type: custom:button-card
+                      entity: input_number.heater_antifreeze_temp
+                      name: "Antifreeze"
+                      show_icon: false
+                      show_state: true
+                      triggers_update:
+                        - input_select.heater_mode
+                      tap_action:
+                        action: more-info
+                      state_display: |
+                        [[[[ const v = parseFloat(entity.state); return isNaN(v) ? '—' : v.toFixed(1) + ' °C'; ]]]]
+                      styles:
+                        grid:
+                          - grid-template-areas: '"n" "s"'
+                          - grid-template-rows: min-content min-content
+                        card:
+                          - height: 72px
+                          - padding: 6px 4px
+                          - border-radius: 14px
+                          - box-shadow: none
+                          - border: |
+                              [[[[ return (states['input_select.heater_mode'] || {}).state === 'Antifreeze' ? '2px solid #4aa3ff' : '1px solid rgba(127,127,127,.35)'; ]]]]
+                        name:
+                          - font-size: 12px
+                          - opacity: 0.75
+                          - white-space: normal
+                        state:
+                          - font-size: clamp(18px, 1vw + 12px, 24px)
+                          - font-weight: 700
+                          - color: '#4aa3ff'
+                    - type: custom:button-card
+                      entity: input_number.heater_antifreeze_temp
+                      icon: mdi:plus
+                      show_name: false
+                      show_state: false
+                      tap_action:
+                        action: call-service
+                        service: input_number.increment
+                        target:
+                          entity_id: input_number.heater_antifreeze_temp
+                      styles:
+                        card:
+                          - height: 72px
+                          - border-radius: 14px
+                          - border: 1px solid rgba(127,127,127,.35)
+                          - box-shadow: none
+                        icon:
+                          - width: 28px
+                - type: markdown
+                  text_only: true
+                  content: "Sensor: cabin temperature. Start at setpoint minus 2 °C, stop at setpoint plus 2 °C, always level 1. Stop in any mode turns the thermostat off (mode Manual)."

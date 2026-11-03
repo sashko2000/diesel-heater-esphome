@@ -1,0 +1,175 @@
+# Home Assistant package "Diesel Heater": thermostat (modes Manual / Comfort / Antifreeze) by cabin temperature.
+# Put it as config/packages/diesel_heater.yaml (next to configuration.yaml; configuration.yaml must contain
+# homeassistant: packages: !include_dir_named packages). A full HA restart is needed after changes.
+# IMPORTANT: replace sensor.cabin_temperature with your cabin temperature sensor (here and in the dashboard).
+#
+# ESPHome entities (device "Diesel Heater"): sensor.run_state_diesel_heater, number.heater_level_diesel_heater,
+# switch.heater_power_diesel_heater, binary_sensor.heater_link_diesel_heater. If your ids differ, fix them here.
+
+# ---------------------------------------------------------------------------------------------------------------
+# THERMOSTAT: keeps the cabin temperature using sensor.cabin_temperature.
+# Modes: "Manual" (the thermostat does nothing), "Comfort", "Antifreeze" (each with its own setpoint).
+# Hysteresis 2 °C: start at temperature <= setpoint - 2, stop at >= setpoint + 2.
+# In thermostat modes the heater always runs at the MINIMUM level 1:
+# after a start the level is reset to 1, and a manual level change in these modes is returned to 1 as well.
+# If the cabin temperature is unavailable or the heater board is offline, the thermostat does nothing.
+# A manual stop (Stop button on the dashboard, the controller's power button) in ANY mode turns the thermostat off:
+# the mode becomes "Manual". A stop made by the thermostat itself is marked by the helper flag input_boolean.heater_thermostat_stop.
+# The thermostat runs inside HA: if HA is down, there is no antifreeze protection.
+# After the first start the setpoints are at their minimum: set them on the dashboard.
+# ---------------------------------------------------------------------------------------------------------------
+
+input_number:
+  heater_comfort_temp:
+    name: "Comfort temperature"
+    min: 12
+    max: 28
+    step: 0.5
+    mode: box
+    unit_of_measurement: "°C"
+    icon: mdi:sofa
+  heater_antifreeze_temp:
+    name: "Antifreeze temperature"
+    min: 3
+    max: 15
+    step: 0.5
+    mode: box
+    unit_of_measurement: "°C"
+    icon: mdi:snowflake-alert
+
+input_select:
+  heater_mode:
+    name: "Heater mode"
+    icon: mdi:thermostat
+    options:
+      - "Manual"
+      - "Comfort"
+      - "Antifreeze"
+
+input_boolean:
+  # helper flag: the stop was made by the thermostat (then the mode is kept); set by the thermostat, cleared by the manual-stop automation
+  heater_thermostat_stop:
+    name: "Heater: stopped by thermostat (helper)"
+    icon: mdi:flag-outline
+
+automation:
+  - id: diesel_heater_thermostat
+    alias: "Heater: thermostat"
+    description: "Comfort / antifreeze by cabin temperature, hysteresis 2 °C, level 1"
+    mode: single
+    max_exceeded: silent
+    triggers:
+      - trigger: state
+        entity_id:
+          - sensor.cabin_temperature
+          - input_select.heater_mode
+          - input_number.heater_comfort_temp
+          - input_number.heater_antifreeze_temp
+          - sensor.run_state_diesel_heater
+          - number.heater_level_diesel_heater
+      - trigger: time_pattern
+        minutes: "/1"
+    variables:
+      hyst: 2
+      hmode: "{{ states('input_select.heater_mode') }}"
+      t_ok: "{{ states('sensor.cabin_temperature') | is_number }}"
+      t: "{{ states('sensor.cabin_temperature') | float(0) }}"
+      sp: >-
+        {{ states('input_number.heater_comfort_temp') | float(20) if hmode == 'Comfort'
+           else states('input_number.heater_antifreeze_temp') | float(5) }}
+      run: "{{ states('sensor.run_state_diesel_heater') }}"
+      lvl: "{{ states('number.heater_level_diesel_heater') | float(0) }}"
+    conditions:
+      - condition: template
+        value_template: "{{ hmode in ['Comfort', 'Antifreeze'] and t_ok }}"
+      - condition: state
+        entity_id: binary_sensor.heater_link_diesel_heater
+        state: "on"
+    actions:
+      - choose:
+          # cold and the heater is stopped: start (during purge we wait: checked every minute)
+          - conditions:
+              - condition: template
+                value_template: "{{ t <= sp - hyst and run == 'Stopped' }}"
+            sequence:
+              - action: switch.turn_on
+                target:
+                  entity_id: switch.heater_power_diesel_heater
+              - action: logbook.log
+                data:
+                  name: "Heater thermostat"
+                  message: "start: cabin {{ t }} °C, target {{ sp }} °C ({{ hmode }})"
+                  entity_id: input_select.heater_mode
+          # warm and the heater is running: stop
+          - conditions:
+              - condition: template
+                value_template: "{{ t >= sp + hyst and run in ['Starting', 'Running'] }}"
+            sequence:
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.heater_thermostat_stop
+              - action: switch.turn_off
+                target:
+                  entity_id: switch.heater_power_diesel_heater
+              - action: logbook.log
+                data:
+                  name: "Heater thermostat"
+                  message: "stop: cabin {{ t }} °C, target {{ sp }} °C ({{ hmode }})"
+                  entity_id: input_select.heater_mode
+          # running above the minimum level: set level 1
+          - conditions:
+              - condition: template
+                value_template: "{{ run in ['Starting', 'Running'] and lvl > 1 }}"
+            sequence:
+              - action: number.set_value
+                target:
+                  entity_id: number.heater_level_diesel_heater
+                data:
+                  value: 1
+
+  # Manual stop in any mode: if the heater was stopped not by the thermostat (dashboard button, controller, another
+  # automation), the mode switches to "Manual" so the thermostat does not start it again.
+  - id: diesel_heater_manual_stop
+    alias: "Heater: manual stop turns the thermostat off"
+    mode: queued
+    triggers:
+      - trigger: state
+        entity_id: sensor.run_state_diesel_heater
+        from:
+          - "Starting"
+          - "Running"
+        to:
+          - "Purge"
+          - "Stopped"
+    actions:
+      - choose:
+          # stopped by the thermostat (flag set less than 5 minutes ago): keep the mode
+          - conditions:
+              - condition: state
+                entity_id: input_boolean.heater_thermostat_stop
+                state: "on"
+              - condition: template
+                value_template: >-
+                  {{ (now() - states.input_boolean.heater_thermostat_stop.last_changed).total_seconds() < 300 }}
+            sequence:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.heater_thermostat_stop
+        default:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.heater_thermostat_stop
+          - if:
+              - condition: template
+                value_template: "{{ states('input_select.heater_mode') in ['Comfort', 'Antifreeze'] }}"
+            then:
+              - action: input_select.select_option
+                target:
+                  entity_id: input_select.heater_mode
+                data:
+                  option: "Manual"
+              - action: logbook.log
+                data:
+                  name: "Heater thermostat"
+                  message: "manual stop: thermostat off, mode Manual"
+                  entity_id: input_select.heater_mode

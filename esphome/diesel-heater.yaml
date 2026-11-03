@@ -1,0 +1,466 @@
+# ESP32 for a Chinese diesel air heater (VEVOR, blue wire of the LCD controller), ESPHome. Version 2026-11-03.
+# Device in HA: "Diesel Heater". Entity ids look like switch.heater_power_diesel_heater (depends on your HA settings).
+#
+# What it does: the board sits on the blue wire of the heater controller (GPIO16 through a 1 kOhm resistor),
+# listens to the "controller -> heater" exchange and can send commands itself (start, stop, level 1-6, temperature request).
+# The controller stays connected and works as before: the board sends its own command only in the pause between controller frames.
+# If no controller is on the line, the board polls the heater itself once per second.
+#
+# Protocol (decoded from logs 2026-11-03; NOT UART and NOT Afterburner), see docs/protocol.md:
+#   - PWM words, bit period about 12 ms: "0" = 4 ms high + 8 ms low, "1" = 8 ms high + 4 ms low.
+#   - every word starts with a sync: line low for 30 ms.
+#   - one frame per second: master command (8 bit) + heater reply (16 bit) 1-2 ms later.
+#   - commands: A6 status (no key), A2 power (TOGGLES start/stop), A3 up, A4 down, AF temperature request.
+#   - reply 0x6xxx: state and level. Low nibble = level - 1 (0..5) when the low byte is 0x4x.
+#       600D = stopped; 6042 -> 6842 -> 6942 (first seconds) = starting; 6D42, 6C42 (after ~80 s) = running;
+#       low byte 0xC0 (61C0, 64C0, 6CC0, 69C0) = purge after stop.
+#     reply 0x4xxx: heater temperature, raw value (low 12 bits) = 10-bit ADC reading of an NTC thermistor.
+#       Conversion (fitted 2026-11-03 on 7 pairs "controller screen °F + raw"): T[K] = 4055.85 / (ln(1023/raw - 1) + 12.0813),
+#       published as Heater Temperature in °C; the raw value stays as Heater Temperature Raw.
+#   The state names "Starting" and "Running" are inferred from logs, not from documentation: see Heater Status Word.
+#
+# Limitation (verified on this heater): it cannot be started during purge (neither from the controller nor by command).
+# So the board refuses a start from HA during purge and writes the reason to Heater Command Result.
+# Commands are verified by the heater reply; if not accepted - up to 3 attempts (retry not earlier than 2.5 s and two replies).
+#
+# Wiring: see docs/diesel-heater-wiring.svg. Blue wire -> 1 kOhm resistor -> GPIO16, black -> GND,
+# do NOT connect the controller red wire (5 V) to the ESP32 (the controller screen flickers); power the board via USB or 12 V -> fuse -> 5 V buck.
+#
+# secrets.yaml must contain api_key_heater (API key, 32 bytes base64), wifi_ssid and wifi_password.
+
+substitutions:
+  name: diesel-heater
+  friendly_name: "Diesel Heater"
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+
+api:
+  encryption:
+    key: !secret api_key_heater
+
+ota:
+  - platform: esphome
+    encryption:
+      key: !secret api_key_heater
+
+logger:
+  level: INFO
+
+globals:
+  # time of the last edge on GPIO16 (us), written by the interrupt
+  - id: edge_us
+    type: uint32_t
+    initial_value: '0'
+  # heater state from the reply: 0 unknown, 1 stopped, 2 starting, 3 running, 4 purge
+  - id: hs_state
+    type: uint8_t
+    initial_value: '0'
+  # level 1..6 (0 unknown), counter of 0x6xxx replies, time of the last reply (ms), word counters
+  - id: hs_level
+    type: uint8_t
+    initial_value: '0'
+  - id: replies
+    type: uint32_t
+    initial_value: '0'
+  - id: last_reply_ms
+    type: uint32_t
+    initial_value: '0'
+  - id: words_ok
+    type: uint32_t
+    initial_value: '0'
+  - id: words_bad
+    type: uint32_t
+    initial_value: '0'
+  # requests from HA: power (0 none, 1 start, 2 stop), target level (0 none)
+  - id: req_power
+    type: uint8_t
+    initial_value: '0'
+  - id: target_level
+    type: uint8_t
+    initial_value: '0'
+  - id: req_ms
+    type: uint32_t
+    initial_value: '0'
+  # transmit bookkeeping: attempts, time of the last transmission, replies at the last command, level at the last command, time of the last temperature request
+  - id: tries
+    type: uint8_t
+    initial_value: '0'
+  - id: last_tx_ms
+    type: uint32_t
+    initial_value: '0'
+  - id: wait_replies
+    type: uint32_t
+    initial_value: '0'
+  - id: lvl_at_send
+    type: uint8_t
+    initial_value: '0'
+  - id: poll_ms
+    type: uint32_t
+    initial_value: '0'
+
+interval:
+  # RECEIVE: an interrupt on both edges of GPIO16 stores edge times in a ring buffer; here they are decoded into words.
+  # Words with short pulses (under 1.5 ms) are treated as noise (Words Bad counter).
+  - interval: 20ms
+    then:
+      - lambda: |-
+          static const uint32_t N = 1024;
+          static volatile uint32_t et[N];
+          static volatile uint8_t el[N];
+          static volatile uint32_t head = 0;
+          static uint32_t tail = 0;
+          static bool inited = false;
+          static bool have_prev = false;
+          static uint8_t plvl = 0;      // level before the last processed edge
+          static uint32_t pt = 0;       // time of the last processed edge, us
+          static uint32_t hi = 0;       // duration of the last high level, us
+          static bool in_word = false;
+          static bool bad = false;
+          static uint32_t nb = 0, val = 0;
+          static uint32_t last_cmd_word = 0xFFFFFFFFu;
+          static uint32_t last_status_word = 0xFFFFFFFFu;
+          static uint32_t last_beat = 0;
+          if (!inited) {
+            inited = true;
+            gpio_reset_pin(GPIO_NUM_16);
+            gpio_set_direction(GPIO_NUM_16, GPIO_MODE_INPUT);
+            gpio_set_pull_mode(GPIO_NUM_16, GPIO_FLOATING);
+            gpio_install_isr_service(0);
+            gpio_set_intr_type(GPIO_NUM_16, GPIO_INTR_ANYEDGE);
+            gpio_isr_handler_add(GPIO_NUM_16, [](void *) {
+              uint32_t h = head;
+              uint32_t now = micros();
+              et[h % N] = now;
+              el[h % N] = (uint8_t) gpio_get_level(GPIO_NUM_16);
+              id(edge_us) = now;
+              head = h + 1;
+            }, nullptr);
+            ESP_LOGI("heater", "blue wire receiver started (GPIO16)");
+            return;
+          }
+          auto emit = []() {
+            if (nb == 0) return;
+            if (bad || nb > 32) { id(words_bad)++; return; }
+            id(words_ok)++;
+            if (nb == 8) {                       // master command (controller or us)
+              if (val != last_cmd_word) {
+                last_cmd_word = val;
+                ESP_LOGI("heater", "command on the line: 0x%02X", (unsigned) val);
+              }
+              return;
+            }
+            if (nb != 16) return;
+            uint16_t w = (uint16_t) val;
+            uint8_t top = w >> 12;
+            if (top == 4) {                      // heater temperature, raw value
+              const uint16_t rv = w & 0x0FFF;
+              id(temp_raw).publish_state((float) rv);
+              // conversion: NTC on a 10-bit ADC, ln(1023/raw - 1) = a + B/T, fitted on 7 pairs 2026-11-03 (error up to 3 °F)
+              if (rv > 0 && rv < 1023) {
+                const float lnr = logf(1023.0f / (float) rv - 1.0f);
+                id(heater_temp).publish_state(4055.85f / (lnr + 12.0813f) - 273.15f);
+              }
+              ESP_LOGD("heater", "temperature: word 0x%04X, raw %u", (unsigned) w, (unsigned) (w & 0x0FFF));
+              return;
+            }
+            if (top != 6) {
+              ESP_LOGI("heater", "unknown reply 0x%04X", (unsigned) w);
+              return;
+            }
+            uint8_t hb = w >> 8, lb = w & 0xFF;
+            uint8_t st;
+            if (lb == 0x0D) st = 1;
+            else if ((lb & 0xC0) == 0xC0) st = 4;
+            else if ((lb & 0xC0) == 0x40) st = (hb == 0x6C || hb == 0x6D) ? 3 : 2;
+            else st = 0;
+            id(replies)++;
+            id(last_reply_ms) = millis();
+            id(hs_state) = st;
+            uint8_t lv = 0;
+            if ((st == 2 || st == 3) && (lb & 0x0F) <= 5) lv = (lb & 0x0F) + 1;
+            id(hs_level) = lv;
+            if (lv != 0) id(level_num).publish_state(lv);
+            const char *txt = "Unknown";
+            switch (st) {
+              case 1: txt = "Stopped"; break;
+              case 2: txt = "Starting"; break;
+              case 3: txt = "Running"; break;
+              case 4: txt = "Purge"; break;
+              default: break;
+            }
+            if (id(run_state).state != txt) id(run_state).publish_state(txt);
+            id(heater_active).publish_state(st == 2 || st == 3 || st == 4);
+            if (w != last_status_word) {
+              last_status_word = w;
+              char t[12];
+              snprintf(t, sizeof(t), "0x%04X", (unsigned) w);
+              id(status_word).publish_state(t);
+              ESP_LOGI("heater", "state: word 0x%04X = %s, level %u", (unsigned) w, txt, (unsigned) lv);
+            }
+          };
+          uint32_t h = head;
+          if (h - tail > N) { tail = h - N; in_word = false; have_prev = false; }
+          for (; tail != h; tail++) {
+            uint32_t t = et[tail % N];
+            uint8_t L = el[tail % N];
+            if (!have_prev) { have_prev = true; plvl = L; pt = t; continue; }
+            if (L == plvl) { bad = true; continue; }   // two edges in a row to the same level: noise
+            uint32_t d = t - pt;
+            if (plvl == 1) {                           // a high level ended
+              hi = d;
+              if (d < 300) bad = true;
+            } else {                                   // a low level ended
+              if (d >= 20000) {                        // sync: end of the previous word, start of a new one
+                if (in_word) emit();
+                in_word = true; nb = 0; val = 0; bad = false;
+              } else if (in_word) {
+                if (hi < 1500 || d < 1500) bad = true;
+                uint32_t bit = hi > d ? 1 : 0;
+                if (nb < 32) val = (val << 1) | bit;
+                nb++;
+              }
+            }
+            plvl = L;
+            pt = t;
+          }
+          // word finished if the line has been high for a while (over 15 ms; inside a word high never exceeds 8 ms): decode now, do not wait for the next sync
+          if (in_word && nb > 0 && plvl == 1 && (uint32_t) (micros() - pt) > 15000) {
+            emit();
+            in_word = false; nb = 0; val = 0;
+          }
+          if (millis() - last_beat > 60000) {
+            last_beat = millis();
+            ESP_LOGI("heater", "words: ok=%u, bad=%u; state=%u, level=%u", (unsigned) id(words_ok), (unsigned) id(words_bad),
+                     (unsigned) id(hs_state), (unsigned) id(hs_level));
+          }
+
+  # TRANSMIT: decides what to send and whether to send now.
+  # Priority: power (request from HA) > level (request from HA) > temperature request AF (every 15 s while the heater runs,
+  # if Heater Temp Poll is on) > A6 (only when no controller is on the line: needed to get replies).
+  # Transmit window: no controller on the line (no edges for 1.5 s) or the pause between controller frames (80-300 ms after the last edge).
+  # At most once per second. Each command is verified by the reply: power by the state, level by the new level; if not accepted -
+  # retry not earlier than 2.5 s and two replies after the previous attempt, up to 3 attempts. Start is refused during purge.
+  # Word shape: high 20 ms, low 30 ms (sync), 8 bits ("1" = 8+4 ms, "0" = 4+8 ms), high 1.5 ms, then the line is released.
+  # Sending blocks the loop for about 130 ms; received edges pile up in the ring buffer and are decoded right after (this is fine).
+  - interval: 5ms
+    then:
+      - lambda: |-
+          uint32_t now = millis();
+          if (now - id(last_tx_ms) < 1000) return;
+          uint32_t age = micros() - id(edge_us);
+          bool quiet_long = (id(edge_us) == 0) || age >= 1500000u;
+          if (!quiet_long && !(age >= 80000u && age < 300000u)) return;
+          const uint8_t st = id(hs_state);
+          const uint8_t lv = id(hs_level);
+          const bool settled = (id(replies) - id(wait_replies)) >= 2 && (now - id(last_tx_ms)) >= 2500;
+          uint8_t cmd = 0;
+          if (id(req_power) != 0) {
+            const uint8_t want = id(req_power);
+            if (want == 1 ? (st == 2 || st == 3) : (st == 1 || st == 4)) {
+              id(req_power) = 0; id(tries) = 0;
+              id(cmd_result).publish_state(want == 1 ? "Start: heater started" : "Stop: purge in progress");
+            } else if (want == 1 && st == 4) {
+              id(req_power) = 0; id(tries) = 0;
+              id(cmd_result).publish_state("Start refused: purge in progress");
+            } else if (st == 0) {
+              if (now - id(req_ms) > 10000) {
+                id(req_power) = 0; id(tries) = 0;
+                id(cmd_result).publish_state("No reply from the heater, power command not sent");
+              }
+            } else if (id(tries) == 0 || settled) {
+              if (id(tries) >= 3) {
+                id(req_power) = 0; id(tries) = 0;
+                id(cmd_result).publish_state("Power command not accepted after 3 attempts");
+              } else {
+                cmd = 0xA2; id(tries)++;
+              }
+            }
+          } else if (id(target_level) != 0) {
+            const uint8_t tg = id(target_level);
+            if (st != 2 && st != 3) {
+              id(target_level) = 0; id(tries) = 0;
+              id(cmd_result).publish_state("Level: heater is not running");
+            } else if (lv == 0) {
+              if (now - id(req_ms) > 10000) { id(target_level) = 0; id(tries) = 0; id(cmd_result).publish_state("Level: no level data"); }
+            } else if (lv == tg) {
+              id(target_level) = 0; id(tries) = 0;
+              char t[40]; snprintf(t, sizeof(t), "Level %u set", (unsigned) tg);
+              id(cmd_result).publish_state(t);
+            } else {
+              if (id(tries) > 0 && lv != id(lvl_at_send)) id(tries) = 0;   // a step happened, count again
+              if (id(tries) == 0 || settled) {
+                if (id(tries) >= 3) {
+                  id(target_level) = 0; id(tries) = 0;
+                  id(cmd_result).publish_state("Level did not change after 3 attempts");
+                } else {
+                  cmd = (tg > lv) ? 0xA3 : 0xA4; id(tries)++; id(lvl_at_send) = lv;
+                }
+              }
+            }
+          }
+          if (cmd == 0 && id(poll_on).state && (st == 2 || st == 3) && now - id(poll_ms) >= 15000) {
+            cmd = 0xAF; id(poll_ms) = now;
+          }
+          if (cmd == 0 && quiet_long) cmd = 0xA6;
+          if (cmd == 0) return;
+          id(last_tx_ms) = now;
+          if (cmd == 0xA2 || cmd == 0xA3 || cmd == 0xA4) id(wait_replies) = id(replies);
+          auto hold = [](uint32_t us) { uint32_t t0 = micros(); while ((uint32_t) (micros() - t0) < us) {} };
+          gpio_set_pull_mode(GPIO_NUM_16, GPIO_PULLUP_ONLY);
+          gpio_set_level(GPIO_NUM_16, 1);
+          gpio_set_direction(GPIO_NUM_16, GPIO_MODE_INPUT_OUTPUT);
+          if (cmd != 0xA6 && cmd != 0xAF) ESP_LOGI("heater", "TX: sending command 0x%02X (attempt %u)", (unsigned) cmd, (unsigned) id(tries));
+          hold(20000);
+          gpio_set_level(GPIO_NUM_16, 0);
+          hold(30000);
+          for (int i = 7; i >= 0; i--) {
+            bool b = (cmd >> i) & 1;
+            gpio_set_level(GPIO_NUM_16, 1);
+            hold(b ? 8000 : 4000);
+            gpio_set_level(GPIO_NUM_16, 0);
+            hold(b ? 4000 : 8000);
+          }
+          gpio_set_level(GPIO_NUM_16, 1);
+          hold(1500);
+          gpio_set_direction(GPIO_NUM_16, GPIO_MODE_INPUT);
+          gpio_set_pull_mode(GPIO_NUM_16, GPIO_FLOATING);
+
+  # Once a minute: word counters to HA (diagnostics)
+  - interval: 60s
+    then:
+      - lambda: |-
+          id(cnt_ok).publish_state(id(words_ok));
+          id(cnt_bad).publish_state(id(words_bad));
+
+sensor:
+  # Temperature inside the heater, °C, from the raw value via the NTC formula (fitted 2026-11-03 against the controller screen,
+  # error about 2 °C; below 54 °C and above 200 °C weakly verified).
+  - platform: template
+    id: heater_temp
+    name: "Heater Temperature"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 0
+  - platform: template
+    id: temp_raw
+    name: "Heater Temperature Raw"
+    icon: mdi:thermometer
+    state_class: measurement
+    accuracy_decimals: 0
+    entity_category: diagnostic
+  - platform: template
+    id: cnt_ok
+    name: "Words OK"
+    state_class: total_increasing
+    accuracy_decimals: 0
+    entity_category: diagnostic
+  - platform: template
+    id: cnt_bad
+    name: "Words Bad"
+    state_class: total_increasing
+    accuracy_decimals: 0
+    entity_category: diagnostic
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 60s
+    entity_category: diagnostic
+  - platform: uptime
+    name: "Uptime"
+    entity_category: diagnostic
+
+text_sensor:
+  - platform: template
+    id: run_state
+    name: "Run State"
+    icon: mdi:fire
+  - platform: template
+    id: status_word
+    name: "Heater Status Word"
+    icon: mdi:code-braces
+    entity_category: diagnostic
+  - platform: template
+    id: cmd_result
+    name: "Heater Command Result"
+    icon: mdi:message-text-outline
+
+binary_sensor:
+  - platform: template
+    id: heater_active
+    name: "Heater Active"
+    device_class: running
+  - platform: template
+    id: heater_link
+    name: "Heater Link"
+    device_class: connectivity
+    entity_category: diagnostic
+    lambda: |-
+      if (id(last_reply_ms) == 0) return false;
+      return (millis() - id(last_reply_ms)) < 15000;
+
+switch:
+  # Power. ON = heater starting or running. Stopping starts the purge (several minutes): do not cut the power meanwhile.
+  # Cannot be started during purge (refused, reason in Heater Command Result).
+  - platform: template
+    id: heater_power
+    name: "Heater Power"
+    icon: mdi:radiator
+    lambda: |-
+      return id(hs_state) == 2 || id(hs_state) == 3;
+    turn_on_action:
+      - lambda: |-
+          if (id(hs_state) == 4) {
+            id(cmd_result).publish_state("Start refused: purge in progress");
+          } else if (id(hs_state) == 0) {
+            id(cmd_result).publish_state("Start refused: no state data");
+          } else if (id(hs_state) == 1) {
+            id(target_level) = 0; id(req_power) = 1; id(tries) = 0; id(req_ms) = millis();
+            id(cmd_result).publish_state("Start: sending command");
+          }
+    turn_off_action:
+      - lambda: |-
+          if (id(hs_state) == 2 || id(hs_state) == 3) {
+            id(target_level) = 0; id(req_power) = 2; id(tries) = 0; id(req_ms) = millis();
+            id(cmd_result).publish_state("Stop: sending command");
+          }
+  # Temperature polling (AF every 15 s while the heater runs): needed for the heater temperature
+  - platform: template
+    id: poll_on
+    name: "Heater Temp Poll"
+    entity_category: config
+    icon: mdi:thermometer-auto
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+
+number:
+  # Level 1..6. Shows the current level from the heater reply; setting it sends A3/A4 step by step and verifies the reply.
+  - platform: template
+    id: level_num
+    name: "Heater Level"
+    icon: mdi:speedometer
+    min_value: 1
+    max_value: 6
+    step: 1
+    mode: slider
+    optimistic: false
+    set_action:
+      - lambda: |-
+          if (id(hs_state) != 2 && id(hs_state) != 3) {
+            id(cmd_result).publish_state("Level: heater is not running");
+          } else if (id(req_power) == 0) {
+            id(target_level) = (uint8_t) x; id(tries) = 0; id(req_ms) = millis();
+            char t[40]; snprintf(t, sizeof(t), "Level: target %u", (unsigned) x);
+            id(cmd_result).publish_state(t);
+          }
