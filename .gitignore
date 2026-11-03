@@ -1,0 +1,10 @@
+# secrets and build folders - never publish
+secrets.yaml
+.storage/
+.esphome/
+.pioenvs/
+.piolibdeps/
+*.log
+__pycache__/
+.DS_Store
+Thumbs.db

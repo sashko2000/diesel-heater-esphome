@@ -1,7 +1,5 @@
 # VEVOR diesel heater → ESPHome / Home Assistant (blue-wire PWM protocol)
 
-[Русская версия](README.ru.md)
-
 An ESP32 sits on the **blue data wire** between a Chinese diesel air heater and its LCD controller
 and lets Home Assistant start/stop the heater, set the power level 1–6, read its state and internal temperature,
 and run a simple thermostat (Comfort / Antifreeze) from any cabin temperature sensor.
