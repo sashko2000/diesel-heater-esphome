@@ -92,6 +92,12 @@ The package and the dashboard compare against these state strings; if you rename
 - A manual Stop (dashboard or the controller's button) in any mode switches the mode to manual.
 - Runs in Home Assistant: no HA, no antifreeze.
 
+## Support
+
+If this project saved you some time, you can buy me a coffee:
+
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/sashko2000)
+
 ## License
 
 MIT, see `LICENSE`. Protocol notes are original work from captures of one heater.
