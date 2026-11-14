@@ -1,0 +1,27 @@
+# Diesel heater: YOUR file for ESPHome Device Builder. Copy it, the firmware itself is pulled from GitHub.
+# To update later: change the version after "@" and press Install.
+#
+# Add to the ESPHome Secrets file (button "Secrets"):
+#   wifi_ssid: "your Wi-Fi name"
+#   wifi_password: "your Wi-Fi password"
+#   api_key_heater: "32-byte base64 key"      # make one with: openssl rand -base64 32
+
+substitutions:
+  name: diesel-heater
+  friendly_name: "Diesel Heater"
+  # heater_gpio: "16"          # uncomment to use another pin for the blue wire
+
+packages:
+  heater: github://sashko2000/diesel-heater-esphome/esphome/diesel-heater.yaml@v1.1.0
+
+api:
+  encryption:
+    key: !secret api_key_heater
+
+ota:
+  - id: !extend ota_esphome
+    password: !secret api_key_heater
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password

@@ -46,6 +46,7 @@ The controller sends a key code once (one frame), then returns to `A6`.
 | Word (examples) | State |
 |---|---|
 | `600D` | stopped (idle) |
+| `600C` | also stopped: replaces `600D` for single frames at irregular intervals (about 900 times a day on this heater); cause unknown |
 | `6042` → `6842` → `6942` | starting (first seconds … ~80 s) |
 | `6D42`, `6C42` (`6C40`…`6C45`) | running (high byte `6C`/`6D`) |
 | `61C0`, `64C0`, `6CC0`, `69C0` | purge / cooldown after stop (low byte `C0`) |
@@ -72,8 +73,8 @@ The controller screen caps at 399 °F. The controller shows the temperature only
 
 ## Sharing the line with the controller
 
-The ESP32 sends its own command frame only in the pause between controller frames: **80–300 ms after the last edge**
+The ESP32 sends its own command frame only in the pause between controller frames: **80–250 ms after the last edge**
 (the controller is silent ~650 ms after the heater's reply; our frame + reply takes ~370 ms). Frame shape:
 high 20 ms, low 30 ms, 8 bits, high 1.5 ms, release. Commands are verified by the next replies and retried up to 3 times.
-With the controller disconnected the ESP32 polls with `A6` once per second itself.
+With the controller disconnected the ESP32 polls with `A6` itself, about every 2 s.
 A few percent of frames get lost, so never assume a command arrived without checking the reply.
