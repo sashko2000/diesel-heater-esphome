@@ -122,7 +122,7 @@ You do not copy the firmware. You keep a short file of your own, and ESPHome dow
      # heater_gpio: "16"          # uncomment to use another pin for the blue wire
 
    packages:
-     heater: github://sashko2000/diesel-heater-esphome/esphome/diesel-heater.yaml@v1.1.0
+     heater: github://sashko2000/diesel-heater-esphome/esphome/diesel-heater.yaml@v1.1.1
 
    api:
      encryption:
@@ -142,7 +142,7 @@ You do not copy the firmware. You keep a short file of your own, and ESPHome dow
    press **Configure** and enter the same `api_key_heater` value when asked for the encryption key.
 
 **Updating.** When a new version is released, change the version after `@` in your file and press Install.
-`@v1.1.0` pins a tested release; `@main` follows the latest commit.
+`@v1.1.1` pins a tested release; `@main` follows the latest commit.
 
 **Without the download.** Save `esphome/diesel-heater.yaml` next to your file in the ESPHome folder and use
 `heater: !include diesel-heater.yaml` instead of the `github://` line.
@@ -247,12 +247,16 @@ Things that are easy to get wrong:
 
 ## Changelog
 
+**1.1.1** (2026-11-14)
+- The state is reset to `Unknown` after 30 s without replies instead of 15 s: at the start of the purge the replies can be unreadable
+  for about 20 s, and *Run State* flickered to `Unknown`. *Heater Link* still turns off after 15 s.
+
 **1.1.0** (2026-11-14)
 - Firmware is now an ESPHome package: your file holds only names, Wi-Fi and keys; the blue-wire pin is a substitution (`heater_gpio`).
 - `0x600C` (a single-frame variant of `0x600D` while idle) is treated as *Stopped*; *Run State* no longer flickers to `Unknown`.
 - A Start or Stop request expires after 30 s and a level request after 60 s. Before, a Start pressed while the heater was unpowered
   could fire when its power came back.
-- No replies for 15 s: the state becomes `Unknown` instead of keeping the last value.
+- No replies for 15 s (30 s since 1.1.1): the state becomes `Unknown` instead of keeping the last value.
 - *Heater Temperature* becomes unknown after a stop instead of keeping the last value.
 - Transmit window narrowed to 80–250 ms after the last edge; after power-up the board listens for 1.5 s before it sends anything.
 

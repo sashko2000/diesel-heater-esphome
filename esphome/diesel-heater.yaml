@@ -1,5 +1,5 @@
 # ESP32 for a Chinese diesel air heater (VEVOR, blue wire of the 5-button LCD controller), ESPHome package.
-# Version 1.1.0 (2026-11-14). Project page: https://github.com/sashko2000/diesel-heater-esphome
+# Version 1.1.1 (2026-11-14). Project page: https://github.com/sashko2000/diesel-heater-esphome
 #
 # HOW TO USE: do not copy this file. Put a short file into ESPHome Device Builder (see esphome/example.yaml):
 #
@@ -7,7 +7,7 @@
 #     name: diesel-heater
 #     friendly_name: "Diesel Heater"
 #   packages:
-#     heater: github://sashko2000/diesel-heater-esphome/esphome/diesel-heater.yaml@v1.1.0
+#     heater: github://sashko2000/diesel-heater-esphome/esphome/diesel-heater.yaml@v1.1.1
 #   api:
 #     encryption:
 #       key: !secret api_key_heater
@@ -44,10 +44,13 @@
 # Wiring: see docs/diesel-heater-wiring.svg. Blue wire -> 1 kOhm resistor -> GPIO16, black -> GND,
 # do NOT connect the controller red wire (5 V) to the ESP32 (the controller screen flickers); power the board via USB or 12 V -> fuse -> 5 V buck.
 #
+# Changes in 1.1.1: the state is reset to "Unknown" after 30 s without replies instead of 15 s. At the start of the purge the
+#   replies are unreadable for about 20 s (seen on the first real run), and Run State flickered to "Unknown". Heater Link stays at 15 s.
+#
 # Changes in 1.1.0:
 #   1. 600C is treated as "Stopped" (before: Run State became "Unknown" for a second, about 900 times a day).
 #   2. An unknown 0x6xxx word changes the state to "Unknown" only after 3 replies in a row.
-#   3. No replies for 15 s: the state is reset to "Unknown" (before: the last state stayed, e.g. "Running").
+#   3. No replies for a while (15 s in 1.1.0, 30 s since 1.1.1): the state is reset to "Unknown" (before: the last state stayed, e.g. "Running").
 #   4. A power request lives at most 30 s, a level request at most 60 s (before: a Start pressed while the heater was
 #      unpowered could fire hours later, when the heater came back on the line).
 #   5. Transmit window 80-250 ms instead of 80-300 ms (our frame with the reply takes about 370 ms, the controller pause is about 650 ms).
@@ -68,7 +71,7 @@ esphome:
   friendly_name: ${friendly_name}
   project:
     name: "sashko2000.diesel-heater-esphome"
-    version: "1.1.0"
+    version: "1.1.1"
 
 esp32:
   board: esp32dev
@@ -296,14 +299,15 @@ interval:
             emit();
             in_word = false; nb = 0; val = 0;
           }
-          // no 0x6xxx replies for 15 s: the state is not known any more (pending requests from HA are then dropped by the transmitter)
-          if (id(hs_state) != 0 && (uint32_t) (millis() - id(last_reply_ms)) > 15000) {
+          // no 0x6xxx replies for 30 s: the state is not known any more (pending requests from HA expire on their own timers).
+          // 30 s, not 15: at the start of the purge the replies are unreadable for about 20 s, which is not a lost link.
+          if (id(hs_state) != 0 && (uint32_t) (millis() - id(last_reply_ms)) > 30000) {
             id(hs_state) = 0; id(hs_level) = 0; unk = 0;
             last_status_word = 0xFFFFFFFFu;
             id(run_state).publish_state("Unknown");
             id(heater_active).publish_state(false);
             id(heater_temp).publish_state(NAN);
-            ESP_LOGW("heater", "no heater replies for 15 s: state reset to Unknown");
+            ESP_LOGW("heater", "no heater replies for 30 s: state reset to Unknown");
           }
           if (millis() - last_beat > 60000) {
             last_beat = millis();

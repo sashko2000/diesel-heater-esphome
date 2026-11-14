@@ -12,7 +12,7 @@ substitutions:
   # heater_gpio: "16"          # uncomment to use another pin for the blue wire
 
 packages:
-  heater: github://sashko2000/diesel-heater-esphome/esphome/diesel-heater.yaml@v1.1.0
+  heater: github://sashko2000/diesel-heater-esphome/esphome/diesel-heater.yaml@v1.1.1
 
 api:
   encryption:
